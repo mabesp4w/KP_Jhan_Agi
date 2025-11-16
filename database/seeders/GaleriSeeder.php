@@ -5,6 +5,8 @@ namespace Database\Seeders;
 use App\Models\Galeri;
 use App\Models\Sekolah;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 
 class GaleriSeeder extends Seeder
 {
@@ -20,6 +22,11 @@ class GaleriSeeder extends Seeder
             return;
         }
 
+        // Pastikan folder galeri ada
+        if (!Storage::disk('public')->exists('galeri')) {
+            Storage::disk('public')->makeDirectory('galeri');
+        }
+
         $kategoriGaleri = ['gedung', 'kegiatan', 'prestasi', 'lainnya'];
 
         $judulGaleri = [
@@ -27,23 +34,16 @@ class GaleriSeeder extends Seeder
                 'Gedung Utama Sekolah',
                 'Fasilitas Perpustakaan',
                 'Laboratorium IPA',
-                'Ruang Kelas',
-                'Lapangan Olahraga',
             ],
             'kegiatan' => [
                 'Upacara Bendera',
                 'Kegiatan Pramuka',
                 'Lomba 17 Agustus',
-                'Kegiatan Keagamaan',
-                'Field Trip Siswa',
-                'Pentas Seni',
             ],
             'prestasi' => [
                 'Juara Olimpiade Matematika',
                 'Juara Lomba Pidato',
                 'Juara Futsal',
-                'Prestasi Akademik',
-                'Penghargaan Sekolah',
             ],
             'lainnya' => [
                 'Kegiatan Ekstrakurikuler',
@@ -52,37 +52,88 @@ class GaleriSeeder extends Seeder
             ],
         ];
 
-        foreach ($sekolahs as $sekolah) {
-            $urutan = 1;
+        $totalGaleri = 0;
+        $maxGaleri = 12;
+        $urutan = 1;
 
-            // Setiap sekolah memiliki beberapa foto galeri
-            foreach ($kategoriGaleri as $kategori) {
-                $jumlahFoto = rand(2, 4);
+        // Ambil beberapa sekolah secara acak untuk distribusi galeri
+        $sekolahsArray = $sekolahs->shuffle()->toArray();
+
+        foreach ($kategoriGaleri as $kategori) {
+            foreach ($judulGaleri[$kategori] as $judul) {
+                if ($totalGaleri >= $maxGaleri) {
+                    break 2; // Break dari kedua loop
+                }
+
+                // Pilih sekolah secara round-robin
+                $sekolah = $sekolahsArray[$totalGaleri % count($sekolahsArray)];
+                $sekolahModel = Sekolah::find($sekolah['id']);
+
+                if (!$sekolahModel) {
+                    continue;
+                }
+
+                // Download gambar dari Picsum Photos
+                $imageUrl = $this->getImageUrl($kategori, $totalGaleri);
                 
-                foreach ($judulGaleri[$kategori] as $index => $judul) {
-                    if ($index >= $jumlahFoto) break;
-
-                    Galeri::firstOrCreate(
-                        [
-                            'id_sekolah' => $sekolah->id,
-                            'judul' => $judul . ' - ' . $sekolah->nm_sekolah,
-                        ],
-                        [
-                            'id_sekolah' => $sekolah->id,
-                            'judul' => $judul . ' - ' . $sekolah->nm_sekolah,
-                            'deskripsi' => 'Foto ' . strtolower($judul) . ' di ' . $sekolah->nm_sekolah . '. ' . 
+                try {
+                    $response = Http::timeout(30)->get($imageUrl);
+                    
+                    if ($response->successful()) {
+                        $imageContent = $response->body();
+                        $filename = 'galeri_' . time() . '_' . uniqid() . '_' . $totalGaleri . '.jpg';
+                        $path = 'galeri/' . $filename;
+                        
+                        // Simpan gambar ke storage
+                        Storage::disk('public')->put($path, $imageContent);
+                        
+                        Galeri::create([
+                            'id_sekolah' => $sekolahModel->id,
+                            'judul' => $judul . ' - ' . $sekolahModel->nm_sekolah,
+                            'deskripsi' => 'Foto ' . strtolower($judul) . ' di ' . $sekolahModel->nm_sekolah . '. ' . 
                                          'Menampilkan kegiatan dan fasilitas sekolah yang mendukung proses pembelajaran.',
-                            'file_foto' => 'galeri/sekolah-' . $sekolah->id . '/' . strtolower(str_replace([' ', '---'], ['-', '-'], preg_replace('/[^a-z0-9-]/i', '', $judul))) . '.jpg',
+                            'file_foto' => $path,
                             'kategori' => $kategori,
                             'urutan' => $urutan++,
                             'tampilkan' => true,
-                        ]
-                    );
+                        ]);
+
+                        $totalGaleri++;
+                        $this->command->info("Downloaded and saved: {$judul} for {$sekolahModel->nm_sekolah}");
+                    } else {
+                        $this->command->warn("Failed to download image for: {$judul}");
+                    }
+                } catch (\Exception $e) {
+                    $this->command->error("Error downloading image for {$judul}: " . $e->getMessage());
                 }
             }
         }
 
-        $this->command->info('Seeder galeri berhasil ditambahkan!');
+        $this->command->info("Seeder galeri berhasil ditambahkan! Total: {$totalGaleri} gambar.");
+    }
+
+    /**
+     * Get image URL based on category and index
+     */
+    private function getImageUrl(string $kategori, int $index): string
+    {
+        // Menggunakan Picsum Photos untuk mendapatkan gambar placeholder
+        // Setiap gambar akan mendapatkan seed yang unik berdasarkan kategori dan index
+        $baseSeeds = [
+            'gedung' => 101,
+            'kegiatan' => 201,
+            'prestasi' => 301,
+            'lainnya' => 401,
+        ];
+
+        $baseSeed = $baseSeeds[$kategori] ?? 100;
+        $seed = $baseSeed + $index; // Setiap gambar akan memiliki seed unik
+        $width = 800;
+        $height = 600;
+        
+        // Picsum Photos API - gratis dan reliable
+        // Format: https://picsum.photos/seed/{seed}/{width}/{height}
+        return "https://picsum.photos/seed/{$seed}/{$width}/{$height}";
     }
 }
 
