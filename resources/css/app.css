@@ -1,0 +1,21 @@
+@import 'tailwindcss';
+@import 'aos/dist/aos.css';
+@import 'leaflet/dist/leaflet.css';
+
+@plugin "daisyui" {
+    themes:
+        light --default,
+        dark --prefersdark,
+        forest,
+        bumblebee,
+        business,
+        acid,
+        winter,
+        dracula,
+        valentine,
+        halloween,
+        garden,
+        corporate,
+        winter,
+        retro;
+}
